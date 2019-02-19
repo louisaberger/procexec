@@ -1,5 +1,7 @@
 package procexec
 
+import "time"
+
 type Executor interface {
 	// Contract:
 	// Implementation is responsible for this being a synchonous call.
@@ -19,5 +21,7 @@ type Executor interface {
 	// Stop should only be called once by the caller.
 	// Therefore, implementations should make effect to at least
 	// have tried to cleanup all that it can before returning an error.
-	Stop() error
+	// Stop() should return after "timeout" even if it hasn't finished cleaning up
+	// goroutines.
+	Stop(timeout time.Duration) error
 }

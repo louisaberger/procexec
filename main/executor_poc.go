@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// Ensures MyExecutor implements the Executor interface
+var _ procexec.Executor = (*MyExecutor)(nil)
+
 type MyExecutor struct {
 	stopChan  chan struct{}
 	processWG *sync.WaitGroup // all spawned processes
@@ -46,15 +49,15 @@ func executeSetup() error {
 	return nil
 }
 
-func (self *MyExecutor) Stop() error {
+func (self *MyExecutor) Stop(timeout time.Duration) error {
 	close(self.stopChan)
 
-	return self.waitForShutdown()
+	return self.waitForShutdown(timeout)
 }
 
-func (self *MyExecutor) waitForShutdown() error {
+func (self *MyExecutor) waitForShutdown(timeout time.Duration) error {
 	s := make(chan struct{})
-	t := time.NewTimer(2 * time.Minute)
+	t := time.NewTimer(timeout)
 
 	go func() {
 		self.processWG.Wait()
@@ -100,8 +103,6 @@ func nestedFunctionToSpawn(stopChan chan struct{}) {
 	}
 }
 
-var _ procexec.Executor = (*MyExecutor)(nil)
-
 func main() {
 	var pe procexec.Executor = NewMyExecutor()
 	panicChan := make(chan *procexec.GoroutinePanic, 128)
@@ -112,7 +113,7 @@ func main() {
 		panic(fmt.Sprintf("Error starting : %v", err))
 	}
 
-	if err := pe.Stop(); err != nil {
+	if err := pe.Stop(time.Minute); err != nil {
 		panic(fmt.Sprintf("Error stopping : %v", err))
 	}
 
@@ -120,7 +121,7 @@ func main() {
 		panic(fmt.Sprintf("Error starting : %v", err))
 	}
 
-	if err := pe.Stop(); err != nil {
+	if err := pe.Stop(time.Minute); err != nil {
 		panic(fmt.Sprintf("Error stopping : %v", err))
 	}
 
