@@ -100,6 +100,8 @@ func nestedFunctionToSpawn(stopChan chan struct{}) {
 	}
 }
 
+var _ procexec.Executor = (*MyExecutor)(nil)
+
 func main() {
 	var pe procexec.Executor = NewMyExecutor()
 	panicChan := make(chan *procexec.GoroutinePanic, 128)
