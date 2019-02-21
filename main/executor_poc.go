@@ -52,24 +52,7 @@ func executeSetup() error {
 func (self *MyExecutor) Stop(timeout time.Duration) error {
 	close(self.stopChan)
 
-	return self.waitForShutdown(timeout)
-}
-
-func (self *MyExecutor) waitForShutdown(timeout time.Duration) error {
-	s := make(chan struct{})
-	t := time.NewTimer(timeout)
-
-	go func() {
-		self.processWG.Wait()
-		close(s)
-	}()
-
-	select {
-	case <-s:
-		return nil
-	case <-t.C:
-		return fmt.Errorf("Timed out waiting for shut down")
-	}
+	return procexec.WaitOrTimeout(self.processWG, timeout)
 }
 
 func RunAgent(processWG *sync.WaitGroup, stopChan chan struct{}, panicChan chan *procexec.GoroutinePanic) {

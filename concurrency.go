@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 type GoroutinePanic struct {
@@ -78,4 +79,23 @@ func cleanerStackTrace(st string) string {
 		cleaner += s
 	}
 	return cleaner
+}
+
+// Returns boolean indicating whether all processes in the
+// wg WaitGroup completed before timeout.
+func WaitOrTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	s := make(chan struct{})
+	t := time.NewTimer(timeout)
+
+	go func() {
+		wg.Wait() // goroutine leak if never returns!
+		close(s)
+	}()
+
+	select {
+	case <-s:
+		return true
+	case <-t.C:
+		return false
+	}
 }
