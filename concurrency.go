@@ -5,7 +5,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 )
 
 type GoroutinePanic struct {
@@ -14,8 +13,8 @@ type GoroutinePanic struct {
 }
 
 // replacement for "go".
-// 1. if panicChan is not nil, captures panics in the goroutine and sends the error to the panicChan channel
-// 2. if processWG is not nil, handles adding and removing this goroutine from the caller's processWG wait group
+// 1. if panicChan is not nil, captures panics in the goroutine and sends the error to the panicChan channel (optional)
+// 2. if processWG is not nil, handles adding and removing this goroutine from the caller's processWG wait group (optional)
 func PanicCapturingGo(f func(), panicChan chan *GoroutinePanic, processWG *sync.WaitGroup) {
 	go func() {
 		defer func() {
@@ -79,23 +78,4 @@ func cleanerStackTrace(st string) string {
 		cleaner += s
 	}
 	return cleaner
-}
-
-// Returns boolean indicating whether all processes in the
-// wg WaitGroup completed before timeout.
-func WaitOrTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
-	s := make(chan struct{})
-	t := time.NewTimer(timeout)
-
-	go func() {
-		wg.Wait() // goroutine leak if never returns!
-		close(s)
-	}()
-
-	select {
-	case <-s:
-		return true
-	case <-t.C:
-		return false
-	}
 }

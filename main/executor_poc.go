@@ -49,13 +49,20 @@ func executeSetup() error {
 	return nil
 }
 
-func (self *MyExecutor) Stop(timeout time.Duration) error {
+func (self *MyExecutor) Stop() error {
+	// send a signal to all spawned go routines to stop
 	close(self.stopChan)
 
-	return procexec.WaitOrTimeout(self.processWG, timeout)
+	// wait for all spawned go routines to return
+	self.processWG.Wait()
+
+	fmt.Printf("Stopped agent\n")
+
+	return nil
 }
 
 func RunAgent(processWG *sync.WaitGroup, stopChan chan struct{}, panicChan chan *procexec.GoroutinePanic) {
+	fmt.Printf("Started agent\n")
 	// Example of a nested spawned go routine in RunAgent
 	procexec.PanicCapturingGo(func() { nestedFunctionToSpawn(stopChan) }, panicChan, processWG)
 
@@ -96,7 +103,9 @@ func main() {
 		panic(fmt.Sprintf("Error starting : %v", err))
 	}
 
-	if err := pe.Stop(time.Minute); err != nil {
+	time.Sleep(2 * time.Second)
+
+	if err := pe.Stop(); err != nil {
 		panic(fmt.Sprintf("Error stopping : %v", err))
 	}
 
@@ -104,7 +113,9 @@ func main() {
 		panic(fmt.Sprintf("Error starting : %v", err))
 	}
 
-	if err := pe.Stop(time.Minute); err != nil {
+	time.Sleep(2 * time.Second)
+
+	if err := pe.Stop(); err != nil {
 		panic(fmt.Sprintf("Error stopping : %v", err))
 	}
 

@@ -1,7 +1,5 @@
 package procexec
 
-import "time"
-
 type Executor interface {
 	// Contract:
 	// Implementation is responsible for this being a synchonous call.
@@ -12,6 +10,14 @@ type Executor interface {
 	// is now running asynchronously.
 	//
 	// Execute() should only be called once by the caller.
+	//
+	// The GoroutinePanic chan is used by the caller to surface panics in spawned
+	// goroutines up to the calling function.
+	// All go routines spawned off within Execute (or its called functions)
+	// should be wrapped in a 'PanicCapturingGo', with this panic chan passed in.
+	// Any panics from a spawned go routine will automatically be recorded to the
+	// channel.
+	// The implementation should not touch this channel for any other purposes.
 	Execute(map[string]interface{}, chan *GoroutinePanic) error
 
 	// Contract:
@@ -19,9 +25,6 @@ type Executor interface {
 	// Stop() should only return once all resources are cleaned up.
 	//
 	// Stop should only be called once by the caller.
-	// Therefore, implementations should make effect to at least
-	// have tried to cleanup all that it can before returning an error.
-	// Stop() should return after "timeout" even if it hasn't finished cleaning up
-	// goroutines.
-	Stop(timeout time.Duration) error
+	// Therefore, implementation should cleanup all that it can before returning an error.
+	Stop() error
 }
