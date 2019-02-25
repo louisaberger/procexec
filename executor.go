@@ -18,7 +18,7 @@ type Executor interface {
 	// Any panics from a spawned go routine will automatically be recorded to the
 	// channel.
 	// The implementation should not touch this channel for any other purposes.
-	Execute(map[string]interface{}, chan *GoroutinePanic) error
+	Execute(chan *GoroutinePanic) error
 
 	// Contract:
 	// Implementation is responsible for this being a synchronous call.

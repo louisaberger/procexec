@@ -13,14 +13,15 @@ var _ procexec.Executor = (*MyExecutor)(nil)
 
 type MyExecutor struct {
 	stopChan  chan struct{}
-	processWG *sync.WaitGroup // all spawned processes
+	processWG *sync.WaitGroup        // all spawned processes
+	config    map[string]interface{} // config settings for my agent
 }
 
-func NewMyExecutor() *MyExecutor {
-	return &MyExecutor{}
+func NewMyExecutor(conf map[string]interface{}) *MyExecutor {
+	return &MyExecutor{config: conf}
 }
 
-func (self *MyExecutor) Execute(settings map[string]interface{}, panicChan chan *procexec.GoroutinePanic) error {
+func (self *MyExecutor) Execute(panicChan chan *procexec.GoroutinePanic) error {
 
 	// set up Process Wait Group
 	var wg sync.WaitGroup
@@ -38,7 +39,7 @@ func (self *MyExecutor) Execute(settings map[string]interface{}, panicChan chan 
 	procexec.PanicCapturingGo(func() { nestedFunctionToSpawn(self.stopChan) }, panicChan, self.processWG)
 
 	// Start our main function that will be running asynchronously
-	procexec.PanicCapturingGo(func() { RunAgent(self.processWG, self.stopChan, panicChan) }, panicChan, self.processWG)
+	procexec.PanicCapturingGo(func() { RunAgent(self.config, self.processWG, self.stopChan, panicChan) }, panicChan, self.processWG)
 	return nil
 }
 
@@ -61,7 +62,7 @@ func (self *MyExecutor) Stop() error {
 	return nil
 }
 
-func RunAgent(processWG *sync.WaitGroup, stopChan chan struct{}, panicChan chan *procexec.GoroutinePanic) {
+func RunAgent(conf map[string]interface{}, processWG *sync.WaitGroup, stopChan chan struct{}, panicChan chan *procexec.GoroutinePanic) {
 	fmt.Printf("Started agent\n")
 	// Example of a nested spawned go routine in RunAgent
 	procexec.PanicCapturingGo(func() { nestedFunctionToSpawn(stopChan) }, panicChan, processWG)
@@ -94,12 +95,10 @@ func nestedFunctionToSpawn(stopChan chan struct{}) {
 }
 
 func main() {
-	var pe procexec.Executor = NewMyExecutor()
 	panicChan := make(chan *procexec.GoroutinePanic, 128)
 
-	settings := map[string]interface{}{}
-
-	if err := pe.Execute(settings, panicChan); err != nil {
+	var pe procexec.Executor = NewMyExecutor(map[string]interface{}{"conf": map[string]interface{}{}})
+	if err := pe.Execute(panicChan); err != nil {
 		panic(fmt.Sprintf("Error starting : %v", err))
 	}
 
@@ -109,7 +108,8 @@ func main() {
 		panic(fmt.Sprintf("Error stopping : %v", err))
 	}
 
-	if err := pe.Execute(settings, panicChan); err != nil {
+	pe = NewMyExecutor(map[string]interface{}{"conf": map[string]interface{}{}})
+	if err := pe.Execute(panicChan); err != nil {
 		panic(fmt.Sprintf("Error starting : %v", err))
 	}
 
