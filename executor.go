@@ -22,9 +22,6 @@ type Executor interface {
 
 	// Contract:
 	// Implementation is responsible for this being a synchronous call.
-	// Stop() should only return once all resources are cleaned up.
-	//
-	// Stop should only be called once by the caller.
-	// Therefore, implementation should cleanup all that it can before returning an error.
-	Stop() error
+	// Stop() should only send back a value on 'finishedChan' return once all resources are cleaned up.
+	Stop(finishedChan chan bool)
 }

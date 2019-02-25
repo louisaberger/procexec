@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/louisaberger/procexec"
 
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -12,13 +13,20 @@ import (
 var _ procexec.Executor = (*MyExecutor)(nil)
 
 type MyExecutor struct {
-	stopChan  chan struct{}
-	processWG *sync.WaitGroup        // all spawned processes
-	config    map[string]interface{} // config settings for my agent
+	config map[string]interface{} // config settings for my agent
+
+	processWG *sync.WaitGroup // all spawned processes
+
+	goctx context.Context
+	// Read/write from anywhere, as long as you grab cancelFuncLock first
+	cancelFunc     context.CancelFunc
+	cancelFuncLock sync.Mutex
 }
 
-func NewMyExecutor(conf map[string]interface{}) *MyExecutor {
-	return &MyExecutor{config: conf}
+func NewMyExecutor(conf map[string]interface{}, parentContext context.Context) *MyExecutor {
+	goctx, cancelFunc := context.WithCancel(parentContext)
+
+	return &MyExecutor{config: conf, goctx: goctx, cancelFunc: cancelFunc, cancelFuncLock: sync.Mutex{}}
 }
 
 func (self *MyExecutor) Execute(panicChan chan *procexec.GoroutinePanic) error {
@@ -27,19 +35,16 @@ func (self *MyExecutor) Execute(panicChan chan *procexec.GoroutinePanic) error {
 	var wg sync.WaitGroup
 	self.processWG = &wg
 
-	// Set up stop chan
-	self.stopChan = make(chan struct{}, 1)
-
 	// Do some setup before starting the agent
 	if err := executeSetup(); err != nil {
 		return err
 	}
 
 	// Some other setup for the agent is spawned off in a separate goroutine
-	procexec.PanicCapturingGo(func() { nestedFunctionToSpawn(self.stopChan) }, panicChan, self.processWG)
+	procexec.PanicCapturingGo(func() { nestedFunctionToSpawn(self.goctx) }, panicChan, self.processWG)
 
 	// Start our main function that will be running asynchronously
-	procexec.PanicCapturingGo(func() { RunAgent(self.config, self.processWG, self.stopChan, panicChan) }, panicChan, self.processWG)
+	procexec.PanicCapturingGo(func() { RunAgent(self.config, self.processWG, panicChan, self.goctx) }, panicChan, self.processWG)
 	return nil
 }
 
@@ -50,31 +55,38 @@ func executeSetup() error {
 	return nil
 }
 
-func (self *MyExecutor) Stop() error {
+func (self *MyExecutor) Stop(finishedChan chan bool) {
 	// send a signal to all spawned go routines to stop
-	close(self.stopChan)
+	self.cancelFuncLock.Lock()
+	defer self.cancelFuncLock.Unlock()
+	self.cancelFunc()
 
 	// wait for all spawned go routines to return
 	self.processWG.Wait()
 
 	fmt.Printf("Stopped agent\n")
 
-	return nil
+	finishedChan <- true
 }
 
-func RunAgent(conf map[string]interface{}, processWG *sync.WaitGroup, stopChan chan struct{}, panicChan chan *procexec.GoroutinePanic) {
+func RunAgent(conf map[string]interface{}, processWG *sync.WaitGroup, panicChan chan *procexec.GoroutinePanic, goctx context.Context) {
 	fmt.Printf("Started agent\n")
 	// Example of a nested spawned go routine in RunAgent
-	procexec.PanicCapturingGo(func() { nestedFunctionToSpawn(stopChan) }, panicChan, processWG)
+	procexec.PanicCapturingGo(func() { nestedFunctionToSpawn(goctx) }, panicChan, processWG)
 
 	i := 0
 	for {
 		select {
-		case <-stopChan:
+		case <-goctx.Done():
 			return
 		default:
 			// do nothing / prevent blocking
 		}
+
+		// If there was an I/O-intensive call here, we would pass in the goctx
+		// If the goctx is cancelled up the stack, it will make that call exit
+		// straight away.
+		// doIOIntensiveWork(goctx)
 
 		fmt.Printf("Running iteration %v...\n", i)
 		i++
@@ -83,10 +95,10 @@ func RunAgent(conf map[string]interface{}, processWG *sync.WaitGroup, stopChan c
 	}
 }
 
-func nestedFunctionToSpawn(stopChan chan struct{}) {
+func nestedFunctionToSpawn(goctx context.Context) {
 	for {
 		select {
-		case <-stopChan:
+		case <-goctx.Done():
 			return
 		default:
 		}
@@ -97,26 +109,59 @@ func nestedFunctionToSpawn(stopChan chan struct{}) {
 func main() {
 	panicChan := make(chan *procexec.GoroutinePanic, 128)
 
-	var pe procexec.Executor = NewMyExecutor(map[string]interface{}{"conf": map[string]interface{}{}})
-	if err := pe.Execute(panicChan); err != nil {
-		panic(fmt.Sprintf("Error starting : %v", err))
-	}
+	// set up to start executor
+	parentGoCtx, parentCancelFunc := context.WithCancel(context.Background())
+	var pe procexec.Executor = NewMyExecutor(map[string]interface{}{"conf": map[string]interface{}{}}, parentGoCtx)
+
+	// start and stop executor
+	StartExecutor(pe, panicChan)
+	StopExecutor(pe, panicChan, parentCancelFunc)
+
+	// set up to start a new instance of executor
+	pe = NewMyExecutor(map[string]interface{}{"conf": map[string]interface{}{}}, parentGoCtx)
+
+	// start a new instance of the executor
+	StartExecutor(pe, panicChan)
+
+	fmt.Printf("Cancelling parent context\n")
+	parentCancelFunc()
 
 	time.Sleep(2 * time.Second)
 
-	if err := pe.Stop(); err != nil {
-		panic(fmt.Sprintf("Error stopping : %v", err))
-	}
+	// should be able to stop executor after cancelling parent function
+	StopExecutor(pe, panicChan, parentCancelFunc)
 
-	pe = NewMyExecutor(map[string]interface{}{"conf": map[string]interface{}{}})
+	// should be able to stop executor twice
+	StopExecutor(pe, panicChan, parentCancelFunc)
+
+}
+
+// What the caller writes to start/stop the executor
+
+func StartExecutor(pe procexec.Executor, panicChan chan *procexec.GoroutinePanic) {
 	if err := pe.Execute(panicChan); err != nil {
 		panic(fmt.Sprintf("Error starting : %v", err))
 	}
-
 	time.Sleep(2 * time.Second)
+}
 
-	if err := pe.Stop(); err != nil {
-		panic(fmt.Sprintf("Error stopping : %v", err))
+func StopExecutor(executor procexec.Executor, panicChan chan *procexec.GoroutinePanic, parentCancelFunc context.CancelFunc) {
+
+	t := time.NewTimer(time.Minute)
+	finishedChan := make(chan bool)
+	procexec.PanicCapturingGo(
+		func() {
+			executor.Stop(finishedChan)
+		},
+		panicChan,
+		nil,
+	)
+
+	select {
+	case <-finishedChan:
+		// success
+	case <-t.C:
+		fmt.Printf("Timed out waiting to stop executor. Cancelling parent context and moving on.\n")
+		parentCancelFunc()
 	}
-
 }
