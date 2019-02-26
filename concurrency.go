@@ -16,7 +16,8 @@ type GoroutinePanic struct {
 // replacement for "go".
 // 1. if panicChan is not nil, captures panics in the goroutine and sends the error to the panicChan channel (optional)
 // 2. if processWG is not nil, handles adding and removing this goroutine from the caller's processWG wait group (optional)
-// 3. if ctx is not nil, passes it through to the 'f' function. If 'f' panics, we will cancel the ctx
+// 3. if parentCtx is not nil, creates a child ctx from it and passes it into 'f'. If 'f' panics, this will call
+// the child ctx's cancel function to cancel anything spawned from 'f' that takes a ctx.
 func PanicCapturingGo(f func(context.Context), panicChan chan *GoroutinePanic, processWG *sync.WaitGroup, parentCtx context.Context) {
 	var ctx context.Context = nil
 	var cancelFunc context.CancelFunc = nil
