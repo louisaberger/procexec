@@ -24,4 +24,9 @@ type Executor interface {
 	// Implementation is responsible for this being a synchronous call.
 	// Stop() should only send back a value on 'finishedChan' return once all resources are cleaned up.
 	Stop(finishedChan chan bool)
+
+	// Contract:
+	// Cancel should try to cancel immediately. It should return quickly.
+	// Cancel is used by the caller if Stop does not complete successfully
+	Cancel()
 }

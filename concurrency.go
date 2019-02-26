@@ -1,6 +1,7 @@
 package procexec
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"strings"
@@ -15,7 +16,13 @@ type GoroutinePanic struct {
 // replacement for "go".
 // 1. if panicChan is not nil, captures panics in the goroutine and sends the error to the panicChan channel (optional)
 // 2. if processWG is not nil, handles adding and removing this goroutine from the caller's processWG wait group (optional)
-func PanicCapturingGo(f func(), panicChan chan *GoroutinePanic, processWG *sync.WaitGroup) {
+// 3. if ctx is not nil, passes it through to the 'f' function. If 'f' panics, we will cancel the ctx
+func PanicCapturingGo(f func(context.Context), panicChan chan *GoroutinePanic, processWG *sync.WaitGroup, parentCtx context.Context) {
+	var ctx context.Context = nil
+	var cancelFunc context.CancelFunc = nil
+	if parentCtx != nil {
+		ctx, cancelFunc = context.WithCancel(parentCtx)
+	}
 	go func() {
 		defer func() {
 			if processWG != nil {
@@ -23,6 +30,9 @@ func PanicCapturingGo(f func(), panicChan chan *GoroutinePanic, processWG *sync.
 			}
 			if panicChan != nil {
 				if r := recover(); r != nil {
+					if cancelFunc != nil {
+						cancelFunc()
+					}
 					panicChan <- &GoroutinePanic{r, stackTrace()}
 				}
 			}
@@ -31,7 +41,7 @@ func PanicCapturingGo(f func(), panicChan chan *GoroutinePanic, processWG *sync.
 		if processWG != nil {
 			processWG.Add(1)
 		}
-		f()
+		f(ctx)
 	}()
 }
 

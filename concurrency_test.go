@@ -1,7 +1,9 @@
 package procexec
 
 import (
+	"context"
 	"fmt"
+	"http"
 	"sync"
 	"testing"
 	"time"
@@ -9,13 +11,27 @@ import (
 
 func TestPanic(t *testing.T) {
 	panicChan := make(chan *GoroutinePanic, 128)
-	PanicCapturingGo(func() { generateAPanic() }, panicChan, nil)
+	PanicCapturingGo(func() { generateAPanic() }, panicChan, nil, nil)
 	tim := time.NewTimer(time.Second)
 	select {
 	case <-panicChan:
 	case <-tim.C:
 		t.Fatalf("Timed out waiting for error to bubble up")
 	}
+}
+
+func TestPanicWithCtx(t *testing.T) {
+	panicChan := make(chan *GoroutinePanic, 128)
+	parentCtx := context.Background()
+	PanicCapturingGo(func() { generateAPanic() }, panicChan, nil, parentCtx)
+
+	tim := time.NewTimer(time.Second)
+	select {
+	case <-panicChan:
+	case <-tim.C:
+		t.Fatalf("Timed out waiting for error to bubble up")
+	}
+
 }
 
 func generateAPanic() {
@@ -28,14 +44,14 @@ func TestWaitGroup(t *testing.T) {
 	numberFunctionsExited = 0
 
 	var processWG sync.WaitGroup
-	stopChan := make(chan struct{}, 1)
+	ctx, cancelFunc := context.WithCancel(context.Background())
 
-	PanicCapturingGo(func() { ongoingFunc(stopChan) }, nil, &processWG)
-	PanicCapturingGo(func() { ongoingFunc(stopChan) }, nil, &processWG)
-	PanicCapturingGo(func() { ongoingFunc(stopChan) }, nil, &processWG)
+	PanicCapturingGo(func(context.Context) { ongoingFunc(ctx) }, nil, &processWG, nil)
+	PanicCapturingGo(func(context.Context) { ongoingFunc(ctx) }, nil, &processWG, nil)
+	PanicCapturingGo(func(context.Context) { ongoingFunc(ctx) }, nil, &processWG, nil)
 
 	time.Sleep(time.Second)
-	close(stopChan)
+	cancelFunc()
 
 	s := make(chan struct{})
 	tim := time.NewTimer(time.Minute)
@@ -56,11 +72,11 @@ func TestWaitGroup(t *testing.T) {
 	}
 }
 
-func ongoingFunc(stopChan chan struct{}) {
+func ongoingFunc(ctx context.Context) {
 	i := 0
 	for {
 		select {
-		case <-stopChan:
+		case <-ctx.Done():
 			numberFunctionsExited++
 			return
 		default:
