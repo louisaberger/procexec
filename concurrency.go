@@ -24,6 +24,9 @@ func PanicCapturingGo(f func(context.Context), panicChan chan *GoroutinePanic, p
 	if parentCtx != nil {
 		ctx, cancelFunc = context.WithCancel(parentCtx)
 	}
+	if processWG != nil {
+		processWG.Add(1)
+	}
 	go func() {
 		defer func() {
 			if processWG != nil {
@@ -39,9 +42,6 @@ func PanicCapturingGo(f func(context.Context), panicChan chan *GoroutinePanic, p
 			}
 		}()
 
-		if processWG != nil {
-			processWG.Add(1)
-		}
 		f(ctx)
 	}()
 }

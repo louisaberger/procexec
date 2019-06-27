@@ -3,7 +3,6 @@ package procexec
 import (
 	"context"
 	"fmt"
-	"http"
 	"sync"
 	"testing"
 	"time"
@@ -11,7 +10,7 @@ import (
 
 func TestPanic(t *testing.T) {
 	panicChan := make(chan *GoroutinePanic, 128)
-	PanicCapturingGo(func() { generateAPanic() }, panicChan, nil, nil)
+	PanicCapturingGo(func(context.Context) { generateAPanic() }, panicChan, nil, nil)
 	tim := time.NewTimer(time.Second)
 	select {
 	case <-panicChan:
@@ -23,7 +22,7 @@ func TestPanic(t *testing.T) {
 func TestPanicWithCtx(t *testing.T) {
 	panicChan := make(chan *GoroutinePanic, 128)
 	parentCtx := context.Background()
-	PanicCapturingGo(func() { generateAPanic() }, panicChan, nil, parentCtx)
+	PanicCapturingGo(func(context.Context) { generateAPanic() }, panicChan, nil, parentCtx)
 
 	tim := time.NewTimer(time.Second)
 	select {
@@ -86,5 +85,26 @@ func ongoingFunc(ctx context.Context) {
 		i++
 
 		time.Sleep(time.Second)
+	}
+}
+func TestWaitOnWaitGroups(t *testing.T) {
+	var wg sync.WaitGroup
+	stuffChan := make(chan string, 10)
+
+	for i := 0; i < 10; i++ {
+		PanicCapturingGo(
+			func(context.Context) {
+				stuffChan <- "foo"
+			},
+			make(chan *GoroutinePanic),
+			&wg,
+			context.Background())
+	}
+
+	wg.Wait() // wait for all 10 goroutines to push to stuffChan
+	close(stuffChan)
+
+	if len(stuffChan) != 10 {
+		t.Fatalf("Expected 10 elements, got %v", len(stuffChan))
 	}
 }
